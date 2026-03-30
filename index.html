@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird with AdsGram Rewarded Ads</title>
+    
+    <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            color: white;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 320px;
+            height: 480px;
+        }
+
+        canvas {
+            background-color: #70c5ce; /* Sky blue */
+            border: 2px solid #fff;
+            border-radius: 8px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+            display: block;
+        }
+
+        #uiMenu {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        h2 {
+            margin-top: 0;
+            font-size: 32px;
+            color: #f1c40f;
+            text-shadow: 2px 2px 0 #000;
+        }
+
+        p {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        button {
+            padding: 12px 20px;
+            font-size: 16px;
+            margin: 10px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            width: 80%;
+            transition: 0.2s;
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        #reviveBtn {
+            background-color: #2ecc71;
+            color: white;
+            box-shadow: 0 4px 0 #27ae60;
+        }
+
+        #restartBtn {
+            background-color: #e74c3c;
+            color: white;
+            box-shadow: 0 4px 0 #c0392b;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="320" height="480"></canvas>
+        
+        <div id="uiMenu">
+            <h2>Game Over!</h2>
+            <p>Score: <span id="finalScore">0</span></p>
+            <button id="reviveBtn">📺 Watch Ad to Revive!</button>
+            <button id="restartBtn">Restart Game</button>
+        </div>
+    </div>
+
+    <script>
+        // 2. Initialize AdsGram SDK
+        const AdController = window.Adsgram.init({ blockId: "26304" });
+
+        // Game Setup
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const uiMenu = document.getElementById("uiMenu");
+        const finalScoreSpan = document.getElementById("finalScore");
+        const reviveBtn = document.getElementById("reviveBtn");
+        const restartBtn = document.getElementById("restartBtn");
+
+        // Game Variables
+        let frames = 0;
+        let score = 0;
+        let currentState = 0; // 0: Get Ready, 1: Playing, 2: Game Over
+        let hasRevived = false; // Only allow one revive per game session
+
+        // Bird Object
+        const bird = {
+            x: 60,
+            y: 200,
+            radius: 12,
+            velocity: 0,
+            gravity: 0.25,
+            jumpStrength: -4.5,
+            draw: function() {
+                ctx.fillStyle = "#f1c40f"; // Yellow bird
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = "#000";
+                ctx.stroke();
+            },
+            update: function() {
+                this.velocity += this.gravity;
+                this.y += this.velocity;
+                
+                // Floor and Ceiling Collision
+                if (this.y + this.radius >= canvas.height || this.y - this.radius <= 0) {
+                    gameOver();
+                }
+            },
+            flap: function() {
+                this.velocity = this.jumpStrength;
+            }
+        };
+
+        // Pipes Object
+        const pipes = {
+            items: [],
+            dx: 2, // Speed moving left
+            gap: 120, // Gap between top and bottom pipe
+            width: 40,
+            draw: function() {
+                ctx.fillStyle = "#2ecc71"; // Green pipes
+                ctx.strokeStyle = "#27ae60";
+                ctx.lineWidth = 2;
+                
+                for (let i = 0; i < this.items.length; i++) {
+                    let p = this.items[i];
+                    // Top pipe
+                    ctx.fillRect(p.x, 0, this.width, p.top);
+                    ctx.strokeRect(p.x, 0, this.width, p.top);
+                    // Bottom pipe
+                    ctx.fillRect(p.x, canvas.height - p.bottom, this.width, p.bottom);
+                    ctx.strokeRect(p.x, canvas.height - p.bottom, this.width, p.bottom);
+                }
+            },
+            update: function() {
+                // Add new pipe every 100 frames
+                if (frames % 100 === 0) {
+                    let minHeight = 50;
+                    let maxHeight = canvas.height - this.gap - minHeight;
+                    let top = Math.max(minHeight, Math.random() * maxHeight);
+                    let bottom = canvas.height - this.gap - top;
+                    this.items.push({ x: canvas.width, top: top, bottom: bottom, passed: false });
+                }
+
+                for (let i = 0; i < this.items.length; i++) {
+                    let p = this.items[i];
+                    p.x -= this.dx;
+
+                    // Collision Detection with Bird
+                    if (bird.x + bird.radius > p.x && bird.x - bird.radius < p.x + this.width) {
+                        if (bird.y - bird.radius < p.top || bird.y + bird.radius > canvas.height - p.bottom) {
+                            gameOver();
+                        }
+                    }
+
+                    // Score Update
+                    if (p.x + this.width < bird.x && !p.passed) {
+                        score++;
+                        p.passed = true;
+                    }
+
+                    // Remove pipes that are off-screen
+                    if (p.x + this.width < 0) {
+                        this.items.shift();
+                        i--;
+                    }
+                }
+            },
+            reset: function() {
+                this.items = [];
+            }
+        };
+
+        function drawScore() {
+            ctx.fillStyle = "#FFF";
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = 4;
+            ctx.font = "bold 35px sans-serif";
+            ctx.strokeText(score, canvas.width / 2 - 10, 50);
+            ctx.fillText(score, canvas.width / 2 - 10, 50);
+        }
+
+        function drawStartText() {
+            ctx.fillStyle = "#FFF";
+            ctx.font = "bold 20px sans-serif";
+            ctx.fillText("Tap to Start", canvas.width / 2 - 60, canvas.height / 2 + 50);
+        }
+
+        // --- Game State Controllers --- //
+
+        function gameOver() {
+            currentState = 2; // Set state to Game Over
+            uiMenu.style.display = "flex";
+            finalScoreSpan.innerText = score;
+            
+            // Hide revive button if they already revived this round
+            if (hasRevived) {
+                reviveBtn.style.display = "none";
+            } else {
+                reviveBtn.style.display = "block";
+            }
+        }
+
+        function resetGame() {
+            bird.y = 200;
+            bird.velocity = 0;
+            pipes.reset();
+            score = 0;
+            frames = 0;
+            hasRevived = false;
+            currentState = 0;
+            uiMenu.style.display = "none";
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            bird.draw();
+            drawStartText();
+        }
+
+        function reviveGame() {
+            // Restore player to safe location
+            bird.y = canvas.height / 2; 
+            bird.velocity = 0;
+            
+            // Move existing pipes away so the player doesn't instantly die again
+            for(let p of pipes.items) {
+                 p.x += 200; 
+            }
+            
+            hasRevived = true;
+            currentState = 1; // Resume playing
+            uiMenu.style.display = "none";
+        }
+
+        // --- Input & Event Listeners --- //
+
+        // Jump mechanism
+        function handleInput(e) {
+            // Prevent zooming on double tap on mobile
+            e.preventDefault(); 
+            
+            if (currentState === 0) {
+                currentState = 1; // Start game
+                bird.flap();
+            } else if (currentState === 1) {
+                bird.flap(); // Flap while playing
+            }
+        }
+
+        canvas.addEventListener("mousedown", handleInput);
+        canvas.addEventListener("touchstart", handleInput, {passive: false});
+
+        // UI Buttons
+        restartBtn.addEventListener("click", resetGame);
+
+        // 3. Trigger Rewarded Ad
+        reviveBtn.addEventListener("click", () => {
+            if (typeof AdController !== "undefined") {
+                // Show the ad
+                AdController.show()
+                    .then((result) => {
+                        // User successfully watched the ad!
+                        reviveGame();
+                    })
+                    .catch((result) => {
+                        // User skipped the ad, or an error occurred
+                        alert("Ad skipped or failed to load. Could not revive.");
+                        console.error("Adsgram Error: ", result);
+                    });
+            } else {
+                alert("Adsgram SDK is not loaded properly.");
+            }
+        });
+
+        // --- Main Game Loop --- //
+
+        function loop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (currentState === 0) {
+                // Get Ready Screen
+                bird.draw();
+                drawStartText();
+            } else if (currentState === 1) {
+                // Playing
+                bird.update();
+                bird.draw();
+                pipes.update();
+                pipes.draw();
+                drawScore();
+                frames++;
+            } else if (currentState === 2) {
+                // Game Over Screen - Freeze frame
+                bird.draw();
+                pipes.draw();
+            }
+            
+            requestAnimationFrame(loop);
+        }
+
+        // Start initial rendering
+        resetGame();
+        loop();
+
+    </script>
+</body>
+</html>
