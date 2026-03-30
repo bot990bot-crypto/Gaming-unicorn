@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Flappy Bird - Tads.me Edition</title>
+    
+    <script src="https://w.tads.me/widget.js" async></script>
+
+    <style>
+        * { box-sizing: border-box; touch-action: none; }
+        body {
+            margin: 0; padding: 0; background-color: #111;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #game-container {
+            position: relative; width: 100%; max-width: 400px;
+            height: 100vh; max-height: 600px;
+            background-color: #70c5ce; box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            overflow: hidden;
+        }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.75); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 10; display: none;
+        }
+        .score-text {
+            color: #fff; font-size: 36px; font-weight: bold;
+            text-shadow: 2px 2px 0 #000; margin-bottom: 30px;
+        }
+        .btn {
+            width: 80%; max-width: 250px; padding: 15px; margin: 10px;
+            font-size: 18px; font-weight: bold; color: white; 
+            border: none; border-radius: 12px; cursor: pointer; text-align: center;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn-ad { background-color: #2ecc71; box-shadow: 0 5px #27ae60; }
+        .btn-restart { background-color: #e74c3c; box-shadow: 0 5px #c0392b; }
+        .btn:disabled { background-color: #95a5a6; box-shadow: 0 5px #7f8c8d; cursor: not-allowed; }
+
+        #score-display {
+            position: absolute; top: 15%; width: 100%; text-align: center; 
+            color: white; font-size: 50px; font-weight: bold; 
+            text-shadow: 3px 3px 0 #000; pointer-events: none; z-index: 5;
+        }
+        #start-msg {
+            position: absolute; top: 40%; width: 100%; text-align: center; 
+            color: white; font-size: 24px; font-weight: bold; 
+            text-shadow: 2px 2px 0 #000; pointer-events: none; z-index: 5;
+        }
+        #tads-container-9587 { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="tads-container-9587"></div>
+
+        <canvas id="gameCanvas" width="320" height="480"></canvas>
+        <div id="score-display">0</div>
+        <div id="start-msg">Tap to Start</div>
+        
+        <div id="ui-layer">
+            <div class="score-text" id="final-score">Score: 0</div>
+            <button id="ad-btn" class="btn btn-ad" onclick="watchAdToRevive()">🎥 Watch Ad to Revive</button>
+            <button class="btn btn-restart" onclick="resetGame()">Restart Game</button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. TADS.ME INTEGRATION LOGIC
+        // ==========================================
+        function watchAdToRevive() {
+            const adBtn = document.getElementById("ad-btn");
+            adBtn.innerText = "⏳ Loading Ad...";
+            adBtn.disabled = true;
+
+            if (window.tads) {
+                window.tads.init({
+                    id: '9587',              
+                    type: 'fullscreen',      
+                    debug: true, // 🟢 TURNED ON: Forces a test ad to show!
+
+                    onShowReward: function() {
+                        console.log("Success!");
+                        revivePlayer();
+                        resetAdButton();
+                    },
+                    onAdsNotFound: function() {
+                        alert("Ad network is finding an ad. Try again in 10 seconds!");
+                        resetAdButton();
+                    },
+                    onClose: function() {
+                        resetAdButton();
+                    }
+                });
+            } else {
+                alert("Please wait a moment for the ad script to connect.");
+                resetAdButton();
+            }
+        }
+
+        function resetAdButton() {
+            const adBtn = document.getElementById("ad-btn");
+            adBtn.innerText = "🎥 Watch Ad to Revive";
+            adBtn.disabled = false;
+        }
+
+        // ==========================================
+        // 2. FLAPPY BIRD GAME LOGIC
+        // ==========================================
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const uiLayer = document.getElementById("ui-layer");
+        const startMsg = document.getElementById("start-msg");
+        const scoreDisplay = document.getElementById("score-display");
+        const finalScoreText = document.getElementById("final-score");
+
+        let frames = 0, animationId, score = 0;
+        let gameState = "start"; 
+
+        const bird = {
+            x: 60, y: 200, width: 24, height: 24,
+            velocity: 0, gravity: 0.3, jump: -6,
+            draw() {
+                ctx.fillStyle = "#f1c40f"; ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.fillStyle = "black"; ctx.fillRect(this.x + 14, this.y + 4, 4, 4);
+            },
+            update() {
+                this.velocity += this.gravity;
+                this.y += this.velocity;
+                if (this.y + this.height >= canvas.height) { this.y = canvas.height - this.height; triggerGameOver(); }
+                if (this.y <= 0) { this.y = 0; this.velocity = 0; }
+            },
+            flap() { this.velocity = this.jump; }
+        };
+
+        let pipes = [];
+        const pipeWidth = 50, pipeGap = 130, pipeSpeed = 2.5;
+
+        function drawPipes() {
+            for (let i = 0; i < pipes.length; i++) {
+                let p = pipes[i];
+                ctx.fillStyle = "#2ecc71";
+                ctx.fillRect(p.x, 0, pipeWidth, p.top);
+                ctx.fillRect(p.x, p.top + pipeGap, pipeWidth, canvas.height);
+                p.x -= pipeSpeed;
+
+                if (bird.x < p.x + pipeWidth && bird.x + bird.width > p.x &&
+                    (bird.y < p.top || bird.y + bird.height > p.top + pipeGap)) {
+                    triggerGameOver();
+                }
+
+                if (p.x + pipeWidth === bird.x || p.x + pipeWidth + 1 === bird.x) {
+                    score++; scoreDisplay.innerText = score;
+                }
+            }
+            if (pipes.length > 0 && pipes[0].x < -pipeWidth) pipes.shift();
+        }
+
+        function spawnPipe() {
+            if (frames % 90 === 0) {
+                let min = 50, max = canvas.height - pipeGap - 50;
+                let topHeight = Math.floor(Math.random() * (max - min + 1) + min);
+                pipes.push({ x: canvas.width, top: topHeight });
+            }
+        }
+
+        function triggerGameOver() {
+            gameState = "gameover";
+            cancelAnimationFrame(animationId);
+            uiLayer.style.display = "flex";
+            finalScoreText.innerText = "Score: " + score;
+        }
+
+        function resetGame() {
+            bird.y = 200; bird.velocity = 0; pipes = []; score = 0; frames = 0;
+            scoreDisplay.innerText = score; uiLayer.style.display = "none";
+            gameState = "playing"; loop();
+        }
+
+        function revivePlayer() {
+            bird.y = 200; bird.velocity = 0; pipes = []; 
+            uiLayer.style.display = "none"; gameState = "playing"; loop();
+        }
+
+        function loop() {
+            if (gameState !== "playing") return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            bird.draw(); bird.update(); spawnPipe(); drawPipes();
+            frames++; animationId = requestAnimationFrame(loop);
+        }
+
+        function handleTap(e) {
+            if (e) e.preventDefault(); 
+            if (gameState === "start") {
+                startMsg.style.display = "none"; gameState = "playing"; loop(); bird.flap();
+            } else if (gameState === "playing") {
+                bird.flap();
+            }
+        }
+
+        // 🟢 FIX: Moved the touch controls to the canvas ONLY, so buttons don't get blocked!
+        canvas.addEventListener("touchstart", handleTap, {passive: false});
+        canvas.addEventListener("mousedown", handleTap);
+        window.addEventListener("keydown", (e) => { if (e.code === "Space") handleTap(); });
+
+        bird.draw();
+        
+    </script>
+</body>
+</html>
